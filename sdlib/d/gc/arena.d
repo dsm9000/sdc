@@ -113,14 +113,28 @@ public:
 	/**
 	 * Small allocation facilities.
 	 */
-	void* allocSmall(shared(ExtentMap)* emap, size_t size) shared {
+	void* allocSmall(shared(ExtentMap)* emap, size_t size_) shared {
+		// Reserve storage for allocation size
+		// TODO: also reserve 8byte for finalizer ptr?
+		auto reserved = size_ < 256 ? 1 : 2;
+		auto size = size_ + reserved;
+
 		// TODO: in contracts
 		assert(size > 0 && size <= SizeClass.Small);
 
 		auto sizeClass = getSizeClass(size);
 		assert(sizeClass < ClassCount.Small);
 
-		return bins[sizeClass].alloc(&this, emap, sizeClass);
+		auto mem = bins[sizeClass].alloc(&this, emap, sizeClass);
+		auto csize = getSizeFromClass(sizeClass);
+		auto tail = csize - reserved;
+		if (csize < 256) {
+			(cast(ubyte*) mem)[tail] = size_ & 0xFF;
+		} else {
+			(cast(ushort*) mem)[tail] = size_ & 0xFFFF;
+		}
+
+		return mem;
 	}
 
 	/**

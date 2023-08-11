@@ -100,6 +100,26 @@ public:
 		return newPtr;
 	}
 
+	size_t msize(void* ptr) {
+		if (ptr is null) {
+			return 0;
+		}
+
+		auto pd = getPageDescriptor(ptr);
+		if (pd.isSlab()) {
+			auto csize = getSizeFromClass(pd.sizeClass);
+			auto reserved = csize < 256 ? 1 : 2;
+			auto tail = csize - reserved;
+			if (csize < 256) {
+				return (cast(ubyte*) ptr)[tail];
+			} else {
+				return (cast(ushort*) ptr)[tail];
+			}
+		} else {
+			return 0; // TODO non-slabs
+		}
+	}
+
 	/**
 	 * GC facilities
 	 */
