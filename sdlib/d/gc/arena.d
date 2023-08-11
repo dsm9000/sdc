@@ -115,7 +115,6 @@ public:
 	 */
 	void* allocSmall(shared(ExtentMap)* emap, size_t size_) shared {
 		// Reserve storage for allocation size
-		// TODO: also reserve 8byte for finalizer ptr?
 		auto reserved = size_ < 256 ? 1 : 2;
 		auto size = size_ + reserved;
 
@@ -126,12 +125,11 @@ public:
 		assert(sizeClass < ClassCount.Small);
 
 		auto mem = bins[sizeClass].alloc(&this, emap, sizeClass);
-		auto csize = getSizeFromClass(sizeClass);
-		auto tail = csize - reserved;
-		if (csize < 256) {
-			(cast(ubyte*) mem)[tail] = size_ & 0xFF;
+		auto isize = binInfos[sizeClass].itemSize;
+		if (isize < 256) {
+			(cast(ubyte*) mem)[isize - 1] = size_ & 0xFF;
 		} else {
-			(cast(ushort*) mem)[tail] = size_ & 0xFFFF;
+			(cast(ushort*) mem)[isize - 2] = size_ & 0xFFFF;
 		}
 
 		return mem;
