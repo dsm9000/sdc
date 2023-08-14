@@ -198,12 +198,12 @@ struct BinInfo {
 
 // Determine whether given size class may hold appendability flag.
 bool mayAppend(ubyte sizeClass) {
-	return !isSmall(sizeClass) || (binInfos[sizeClass].slots <= 256);
+	return !isSizeClassSmall(sizeClass) || (binInfos[sizeClass].slots <= 256);
 }
 
 // Determine whether given size class may hold finalization flag.
 bool mayFinalize(ubyte sizeClass) {
-	return !isSmall(sizeClass) || (binInfos[sizeClass].slots <= 128);
+	return !isSizeClassSmall(sizeClass) || (binInfos[sizeClass].slots <= 128);
 }
 
 // Take given alloc size and augment if required to store the given meta flags.
@@ -251,7 +251,7 @@ size_t effectiveSizeWithMeta(size_t payloadSize, bool isAppendable,
 	auto lenBytes = special ? (size < 256 ? 1 : 2) : 0;
 	auto finBytes = isFinalizable ? 8 : 0; // room for void* if finalized
 	auto trySize = size + lenBytes + finBytes;
-	if (trySize <= SizeClass.Small) {
+	if (isSizeSmall(trySize)) {
 		// Ensure that we have a size class that allows our meta flags:
 		trySize = sizeUpWithMeta(trySize, isAppendable, isFinalizable);
 		// May need to recalculate size class if crossed 256 bytes :

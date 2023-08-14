@@ -159,7 +159,7 @@ public:
 		}
 
 		// Size class could have started as small but then ratcheted up:
-		if (size <= SizeClass.Small) {
+		if (isSizeSmall(size)) {
 			auto mem = allocSmall(emap, size, isAppendable, finalizer);
 			if (zero) {
 				memset(mem, 0, _size);
@@ -187,10 +187,10 @@ public:
 	                 bool isAppendable = false, void* finalizer = null) shared {
 		bool isFinalizable = finalizer != null;
 		// TODO: in contracts
-		assert(size > 0 && size <= SizeClass.Small);
+		assert(size > 0 && isSizeSmall(size));
 
 		auto sizeClass = getSizeClass(size);
-		assert(sizeClass < ClassCount.Small);
+		assert(isSizeClassSmall(sizeClass));
 
 		return bins[sizeClass]
 			.alloc(&this, emap, sizeClass, isAppendable, isFinalizable);
@@ -202,7 +202,7 @@ public:
 	void* allocLarge(shared(ExtentMap)* emap, size_t size, bool zero = false,
 	                 bool isAppendable = false, void* finalizer = null) shared {
 		// TODO: in contracts
-		assert(size > SizeClass.Small && size <= MaxAllocationSize);
+		assert(!isSizeSmall(size) && size <= MaxAllocationSize);
 
 		bool isFinalizable = finalizer != null;
 

@@ -113,7 +113,7 @@ unittest getSizeClass {
 }
 
 size_t getSizeFromClass(uint sizeClass) {
-	if (sizeClass < ClassCount.Small) {
+	if (isSizeClassSmall(sizeClass)) {
 		import d.gc.bin;
 		return binInfos[sizeClass].itemSize;
 	}
@@ -169,15 +169,21 @@ auto getBinInfos() {
 		uint p = needPages;
 		ushort slots = ((p << LgPageSize) / s) & ushort.max;
 
-		assert(id < ClassCount.Small);
+		assert(isSizeClassSmall(id));
 		bins[id] = BinInfo(itemSize, shift, needPages, slots);
 	});
 
 	return bins;
 }
 
-bool isSmall(ubyte sizeClass) {
+// Determine whether given size class is considered 'small' (slab-allocatable).
+bool isSizeClassSmall(uint sizeClass) {
 	return sizeClass < ClassCount.Small;
+}
+
+// Determine whether given size may fit into a 'small' (slab-allocatable) size class.
+bool isSizeSmall(size_t size) {
+	return isSizeClassSmall(getSizeClass(size));
 }
 
 private:
