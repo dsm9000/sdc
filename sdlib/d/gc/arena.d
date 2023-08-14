@@ -77,14 +77,14 @@ private:
 		return !isSmall(sizeClass) || (binInfos[sizeClass].slots <= 128);
 	}
 
-	ubyte scWithMeta(size_t size, bool append, bool finalize) shared {
+	size_t sizeUpWithMeta(size_t size, bool append, bool finalize) shared {
 		auto sc = getSizeClass(size);
 		while ((append && !mayAppend(sc)) || (finalize && !mayFinalize(sc))) {
 			sc += 1;
 			assert(sc <= ubyte.max);
 		}
 
-		return sc;
+		return getSizeFromClass(sc);
 	}
 
 public:
@@ -185,15 +185,13 @@ public:
 			auto trySize = size + lenBytes + finBytes;
 			if (unlikely(trySize <= SizeClass.Small)) {
 				// Ensure that we have a size class that allows our meta flags:
-				auto sizeClass =
-					scWithMeta(trySize, isAppendable, isFinalizable);
-				trySize = getSizeFromClass(sizeClass);
+				trySize = sizeUpWithMeta(trySize, isAppendable, isFinalizable);
 				// May need to recalculate size class if crossed 256 bytes :
 				if (unlikely((lenBytes == 1) && (trySize >= 256))) {
 					trySize += 1; // Now need extra byte for length header
-					sizeClass =
-						scWithMeta(trySize, isAppendable, isFinalizable);
-					size = getSizeFromClass(sizeClass); // Effective size
+					trySize =
+						sizeUpWithMeta(trySize, isAppendable, isFinalizable);
+					size = trySize; // Effective size
 				}
 			}
 		}
