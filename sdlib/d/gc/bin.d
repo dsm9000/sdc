@@ -238,5 +238,37 @@ unittest sizeClassForMeta {
 	assert(sizeUpWithMeta(50, true, false) == 64);
 }
 
+// Determine effective size required for an alloc (presumed initially to be
+// small, i.e. on slab) with given payload length and set of meta flags.
+// If the initial size is not small, it is returned unchanged.
+// The returned effective size is not guaranteed to be small;
+// calling code must verify whether the alloc may still take place on slab.
+size_t effectiveSizeWithMeta(size_t payloadSize, bool isAppendable,
+                             bool isFinalizable) {
+	auto size = payloadSize;
+	// Find initial estimate for size class, assuming smallness:
+	auto lenBytes = size < 256 ? 1 : 2; // init estimate for length bytes
+	auto finBytes = isFinalizable ? 8 : 0; // room for void* if finalized
+	auto trySize = size + lenBytes + finBytes;
+	if (trySize <= SizeClass.Small) {
+		// Ensure that we have a size class that allows our meta flags:
+		trySize = sizeUpWithMeta(trySize, isAppendable, isFinalizable);
+		// May need to recalculate size class if crossed 256 bytes :
+		if ((lenBytes == 1) && (trySize >= 256)) {
+			trySize += 1; // Now need extra byte for length header
+			trySize = sizeUpWithMeta(trySize, isAppendable, isFinalizable);
+		}
+
+		size = trySize; // Effective size
+	}
+
+	return size;
+}
+
+unittest effectiveSizeWithMeta {
+	assert(effectiveSizeWithMeta(7, false, false) == 8);
+	assert(effectiveSizeWithMeta(1, true, false) == 16);
+}
+
 import d.gc.sizeclass;
 immutable BinInfo[ClassCount.Small] binInfos = getBinInfos();

@@ -155,23 +155,7 @@ public:
 		bool special = isFinalizable || isAppendable; // If must store length
 
 		if (unlikely(special)) {
-			// Find initial estimate for size class, assuming smallness:
-			auto lenBytes =
-				size < 256 ? 1 : 2; // init estimate for length bytes
-			auto finBytes =
-				isFinalizable ? 8 : 0; // room for void* if finalized
-			auto trySize = size + lenBytes + finBytes;
-			if (unlikely(trySize <= SizeClass.Small)) {
-				// Ensure that we have a size class that allows our meta flags:
-				trySize = sizeUpWithMeta(trySize, isAppendable, isFinalizable);
-				// May need to recalculate size class if crossed 256 bytes :
-				if (unlikely((lenBytes == 1) && (trySize >= 256))) {
-					trySize += 1; // Now need extra byte for length header
-					trySize =
-						sizeUpWithMeta(trySize, isAppendable, isFinalizable);
-					size = trySize; // Effective size
-				}
-			}
+			size = effectiveSizeWithMeta(size, isAppendable, isFinalizable);
 		}
 
 		// Size class could have started as small but then ratcheted up:
