@@ -355,8 +355,8 @@ public:
 	@property
 	ref Bitmap!128 finFlags() {
 		// FIXME: in contract.
-		assert(isSlab(), "apFlags accessed on non slab!");
-		assert(slabSlots <= 128, "apFlags accessed on slab with >128 slots!");
+		assert(isSlab(), "finFlags accessed on non slab!");
+		assert(slabSlots <= 128, "finFlags accessed on slab with >128 slots!");
 
 		return meta.slab128.finFlags;
 	}
