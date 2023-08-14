@@ -242,12 +242,13 @@ unittest sizeClassForMeta {
 // small, i.e. on slab) with given payload length and set of meta flags.
 // If the initial size is not small, it is returned unchanged.
 // The returned effective size is not guaranteed to be small;
-// calling code must verify whether the alloc may still take place on slab.
+// calling code must verify whether the alloc may take place on slab.
 size_t effectiveSizeWithMeta(size_t payloadSize, bool isAppendable,
                              bool isFinalizable) {
 	auto size = payloadSize;
+	bool special = isFinalizable || isAppendable; // If must store length
 	// Find initial estimate for size class, assuming smallness:
-	auto lenBytes = size < 256 ? 1 : 2; // init estimate for length bytes
+	auto lenBytes = special ? (size < 256 ? 1 : 2) : 0;
 	auto finBytes = isFinalizable ? 8 : 0; // room for void* if finalized
 	auto trySize = size + lenBytes + finBytes;
 	if (trySize <= SizeClass.Small) {
@@ -266,8 +267,29 @@ size_t effectiveSizeWithMeta(size_t payloadSize, bool isAppendable,
 }
 
 unittest effectiveSizeWithMeta {
-	assert(effectiveSizeWithMeta(7, false, false) == 8);
+	// Adjustment of small alloc sizes to fit meta fields when required:
+	assert(effectiveSizeWithMeta(1, false, false) == 8);
 	assert(effectiveSizeWithMeta(1, true, false) == 16);
+	assert(effectiveSizeWithMeta(1, false, true) == 32);
+	assert(effectiveSizeWithMeta(7, false, false) == 8);
+	assert(effectiveSizeWithMeta(8, false, false) == 8);
+	assert(effectiveSizeWithMeta(24, false, false) == 24);
+	assert(effectiveSizeWithMeta(24, true, false) == 32);
+	assert(effectiveSizeWithMeta(48, false, false) == 48);
+	assert(effectiveSizeWithMeta(48, false, true) == 64);
+	assert(effectiveSizeWithMeta(1, true, true) == 32);
+	assert(effectiveSizeWithMeta(256, false, false) == 256);
+	assert(effectiveSizeWithMeta(256, true, false) == 320);
+	assert(effectiveSizeWithMeta(256, true, true) == 320);
+	assert(effectiveSizeWithMeta(310, false, true) == 320);
+	assert(effectiveSizeWithMeta(310, true, true) == 320);
+	assert(effectiveSizeWithMeta(318, true, false) == 320);
+	assert(effectiveSizeWithMeta(318, true, true) == 384);
+	assert(effectiveSizeWithMeta(320, false, false) == 320);
+	assert(effectiveSizeWithMeta(320, false, false) == 320);
+	// Not small at start, so no adjustment required:
+	assert(effectiveSizeWithMeta(50000, false, false) == 50000);
+	assert(effectiveSizeWithMeta(50000, true, true) == 50000);
 }
 
 import d.gc.sizeclass;

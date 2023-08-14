@@ -89,12 +89,6 @@ public:
 			return null;
 		}
 
-		// If neither is a slab, copy 'large' metadata:
-		auto pdNew = getPageDescriptor(newPtr);
-		if (!pd.isSlab() && !pdNew.isSlab()) {
-			pdNew.extent.extMeta = pd.extent.extMeta;
-		}
-
 		memcpy(newPtr, ptr, copySize);
 		pd.arena.free(emap, pd, ptr);
 
