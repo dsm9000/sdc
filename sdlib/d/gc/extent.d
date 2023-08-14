@@ -102,7 +102,7 @@ private:
 
 	union _meta {
 		// Slab occupancy (constrained by freeSlots, so usable for all classes)
-		Bitmap!512 slab512;
+		Bitmap!512 slabOccupy;
 
 		// Slabs with 256 slots, appendability flag for each slot
 		struct slab256 {
@@ -112,10 +112,8 @@ private:
 
 		// Slabs with 128 or fewer slots, appendability and finalizer flags
 		struct slab128 {
-			ubyte[16] _skip;
-			Bitmap!128 apFlags;
+			ubyte[48] _skip;
 			Bitmap!128 finFlags;
-			ubyte[16] _unused; // could have yet a third type of flag...
 		}
 
 		// Metadata for non-slab (large) size classes
@@ -123,7 +121,7 @@ private:
 			ulong allocSize; // actual size
 			bool canAppend; // appendable?
 			void* finalizer; // finalizer ptr, if finalizable
-			ubyte[46] _unused;
+			ubyte[47] _unused;
 		}
 	}
 
@@ -291,19 +289,11 @@ public:
 		auto index = slabData.setFirst();
 
 		auto width = slabSlots;
-		if (isAppendable) {
-			assert(width != 512, "cannot set Ap flag on 512-slot slab!");
-			if (width == 256) {
-				meta.slab256.apFlags.setBit(index);
-			} else { // 128 and fewer slots
-				meta.slab128.apFlags.setBit(index);
-			}
-		}
+		if (isAppendable)
+			apFlags.setBit(index);
 
-		if (isFinalizable) {
-			assert(width <= 128, "cannot set Fin flag on >128-slot slab!");
-			meta.slab128.finFlags.setBit(index);
-		}
+		if (isFinalizable)
+			finFlags.setBit(index);
 
 		return index;
 	}
@@ -317,31 +307,22 @@ public:
 		slabData.clearBit(index);
 
 		// Clear meta flags, if they exist
-		switch (slabSlots) {
-			case 512:
-				break;
-			case 256:
-				meta.slab256.apFlags.clearBit(index);
-				break;
-			default: // 128 and fewer slots
-				meta.slab128.apFlags.clearBit(index);
-				meta.slab128.finFlags.clearBit(index);
-				break;
-		}
+		if (slabSlots <= 256)
+			apFlags.clearBit(index);
+
+		if (slabSlots <= 128)
+			finFlags.clearBit(index);
 	}
 
 	@property
 	bool isAppendable(uint index) {
 		assert(isSlab(), "isAppendable(index) accessed on non slab!");
 
-		switch (slabSlots) {
-			case 512:
-				return false; // 512-slot classes are never appendable
-			case 256:
-				return meta.slab256.apFlags.valueAt(index);
-			default: // 128 and fewer slots
-				return meta.slab128.apFlags.valueAt(index);
-		}
+		// 512-slot classes are never appendable
+		if (slabSlots == 512)
+			return false;
+
+		return apFlags.valueAt(index);
 	}
 
 	@property
@@ -351,7 +332,7 @@ public:
 		if (slabSlots > 128) // >128-slot classes are never finalizable
 			return false;
 
-		return meta.slab128.finFlags.valueAt(index);
+		return finFlags.valueAt(index);
 	}
 
 	@property
@@ -359,7 +340,25 @@ public:
 		// FIXME: in contract.
 		assert(isSlab(), "slabData accessed on non slab!");
 
-		return meta.slab512;
+		return meta.slabOccupy;
+	}
+
+	@property
+	ref Bitmap!256 apFlags() {
+		// FIXME: in contract.
+		assert(isSlab(), "apFlags accessed on non slab!");
+		assert(slabSlots != 512, "apFlags accessed on 512-slot slab!");
+
+		return meta.slab256.apFlags;
+	}
+
+	@property
+	ref Bitmap!128 finFlags() {
+		// FIXME: in contract.
+		assert(isSlab(), "apFlags accessed on non slab!");
+		assert(slabSlots <= 128, "apFlags accessed on slab with >128 slots!");
+
+		return meta.slab128.finFlags;
 	}
 
 	@property
