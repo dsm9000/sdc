@@ -281,11 +281,11 @@ public:
 
 		bool didFree = false;
 		if (unlikely(!pd.isSlab())) {
-			// TODO: call small finalizer if exists
+			// TODO: call large finalizer if exists
 			pd.extent.clearLarge();
 			didFree = true;
 		} else {
-			// TODO: call large finalizer if exists
+			// TODO: call small finalizer if exists
 			if (likely(bins[pd.sizeClass].free(&this, ptr, pd))) {
 				didFree = true;
 			}
