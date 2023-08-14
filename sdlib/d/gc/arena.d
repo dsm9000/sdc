@@ -65,28 +65,6 @@ private:
 		return cast(shared(Arena)*) arenaStore[index].ptr;
 	}
 
-	bool isSmall(ubyte sizeClass) shared {
-		return sizeClass < ClassCount.Small;
-	}
-
-	bool mayAppend(ubyte sizeClass) shared {
-		return !isSmall(sizeClass) || (binInfos[sizeClass].slots <= 256);
-	}
-
-	bool mayFinalize(ubyte sizeClass) shared {
-		return !isSmall(sizeClass) || (binInfos[sizeClass].slots <= 128);
-	}
-
-	size_t sizeUpWithMeta(size_t size, bool append, bool finalize) shared {
-		auto sc = getSizeClass(size);
-		while ((append && !mayAppend(sc)) || (finalize && !mayFinalize(sc))) {
-			sc += 1;
-			assert(sc <= ubyte.max);
-		}
-
-		return getSizeFromClass(sc);
-	}
-
 public:
 	static getInitialized(uint index) {
 		auto a = getArenaAddress(index);
