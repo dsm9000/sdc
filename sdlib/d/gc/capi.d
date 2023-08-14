@@ -23,10 +23,6 @@ void* realloc(void* ptr, size_t size) {
 	return threadCache.realloc(ptr, size, true);
 }
 
-size_t msize(void* ptr) {
-	return threadCache.msize(ptr);
-}
-
 /**
  * SDC runtime API.
  */
@@ -46,10 +42,6 @@ void* __sd_gc_realloc(void* ptr, size_t size) {
 	return threadCache.realloc(ptr, size, true);
 }
 
-size_t __sd_gc_msize(void* ptr) {
-	return threadCache.msize(ptr);
-}
-
 void __sd_gc_set_stack_bottom(const void* bottom) {
 	threadCache.stackBottom = makeRange(bottom[0 .. 0]).ptr;
 }
@@ -61,3 +53,5 @@ void __sd_gc_add_roots(const void[] range) {
 void __sd_gc_collect() {
 	threadCache.collect();
 }
+
+// TODO: knobs for appendable/finalizable allocs

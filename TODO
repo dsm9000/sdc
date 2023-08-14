@@ -1,0 +1,15 @@
+Appendable allocs:
+
+Done:
+
+* Store appendability, finalizability flags in slabData space for both slab and large allocs
+* Store actual alloc length and finalizer, if applicable, in slabData space (for large allocs) or in tail of suitably enlarged block (for slab allocs)
+
+Remaining:
+
+* Predicate returning whether an alloc is appendable.
+* Function to read avail. space in appendable alloc.
+* Function to append (or reduce) an appendable alloc.
+* Preserve metadata (from both slab and large allocs) during realloc()
+* Actually invoke the finalizer, if present, during free()
+* Tests.

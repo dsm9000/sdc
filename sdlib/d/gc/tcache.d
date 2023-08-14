@@ -15,7 +15,8 @@ private:
 	const(void*)[][] roots;
 
 public:
-	void* alloc(size_t size, bool containsPointers) {
+	void* alloc(size_t size, bool containsPointers, bool isAppendable = false,
+	            void* finalizer = null) {
 		if (!isAllocatableSize(size)) {
 			return null;
 		}
@@ -23,12 +24,11 @@ public:
 		initializeExtentMap();
 
 		auto arena = chooseArena(containsPointers);
-		return size <= SizeClass.Small
-			? arena.allocSmall(emap, size)
-			: arena.allocLarge(emap, size, false);
+		return arena.allocator(emap, size, false, isAppendable, finalizer);
 	}
 
-	void* calloc(size_t size, bool containsPointers) {
+	void* calloc(size_t size, bool containsPointers, bool isAppendable = false,
+	             void* finalizer = null) {
 		if (!isAllocatableSize(size)) {
 			return null;
 		}
@@ -36,13 +36,7 @@ public:
 		initializeExtentMap();
 
 		auto arena = chooseArena(containsPointers);
-		if (size <= SizeClass.Small) {
-			auto ret = arena.allocSmall(emap, size);
-			memset(ret, 0, size);
-			return ret;
-		}
-
-		return arena.allocLarge(emap, size, true);
+		return arena.allocator(emap, size, true, isAppendable, finalizer);
 	}
 
 	void free(void* ptr) {
@@ -68,6 +62,7 @@ public:
 		auto pd = getPageDescriptor(ptr);
 
 		if (pd.isSlab()) {
+			// TODO: copy slab metadata!
 			auto newSizeClass = getSizeClass(size);
 			auto oldSizeClass = pd.sizeClass;
 			if (newSizeClass == oldSizeClass) {
@@ -94,30 +89,16 @@ public:
 			return null;
 		}
 
+		// If neither is a slab, copy 'large' metadata:
+		auto pdNew = getPageDescriptor(newPtr);
+		if (!pd.isSlab() && !pdNew.isSlab()) {
+			pdNew.extent.extMeta = pd.extent.extMeta;
+		}
+
 		memcpy(newPtr, ptr, copySize);
 		pd.arena.free(emap, pd, ptr);
 
 		return newPtr;
-	}
-
-	size_t msize(void* ptr) {
-		if (ptr is null) {
-			return 0;
-		}
-
-		auto pd = getPageDescriptor(ptr);
-		if (pd.isSlab()) {
-			auto csize = getSizeFromClass(pd.sizeClass);
-			auto reserved = csize < 256 ? 1 : 2;
-			auto tail = csize - reserved;
-			if (csize < 256) {
-				return (cast(ubyte*) ptr)[tail];
-			} else {
-				return (cast(ushort*) ptr)[tail];
-			}
-		} else {
-			return 0; // TODO non-slabs
-		}
 	}
 
 	/**

@@ -1,6 +1,8 @@
 module d.gc.extent;
 
 import d.gc.base;
+import d.gc.bitmap;
+import d.gc.bin;
 import d.gc.heap;
 import d.gc.rbtree;
 import d.gc.sizeclass;
@@ -98,8 +100,34 @@ private:
 
 	Links _links;
 
-	import d.gc.bitmap;
-	Bitmap!512 _slabData = void;
+	union _meta {
+		// Slab occupancy (constrained by freeSlots, so usable for all classes)
+		Bitmap!512 slab512;
+
+		// Slabs with 256 slots, appendability flag for each slot
+		struct slab256 {
+			ubyte[32] _skip;
+			Bitmap!256 apFlags;
+		}
+
+		// Slabs with 128 or fewer slots, appendability and finalizer flags
+		struct slab128 {
+			ubyte[16] _skip;
+			Bitmap!128 apFlags;
+			Bitmap!128 finFlags;
+			ubyte[16] _unused; // could have yet a third type of flag...
+		}
+
+		// Metadata for non-slab (large) size classes
+		struct large {
+			ulong allocSize; // actual size
+			bool canAppend; // appendable?
+			void* finalizer; // finalizer ptr, if finalizable
+			ubyte[46] _unused;
+		}
+	}
+
+	_meta meta;
 
 	this(uint arenaIndex, void* ptr, size_t size, ubyte generation,
 	     HugePageDescriptor* hpd, ExtentClass ec) {
@@ -116,14 +144,51 @@ private:
 		bits |= ulong(arenaIndex) << 32;
 
 		if (ec.isSlab()) {
-			import d.gc.bin;
-			bits |= ulong(binInfos[ec.sizeClass].slots) << 48;
+			bits |= slabSlots << 48;
 
+			// Clear all slab occupancy and any meta flags as well
 			slabData.clear();
+		} else {
+			clearLarge();
 		}
 	}
 
 public:
+	void clearLarge() {
+		meta.large.allocSize = 0;
+		meta.large.canAppend = false;
+		meta.large.finalizer = null;
+	}
+
+	@property
+	ref bool appendable() {
+		assert(!isSlab(), "appendable accessed on slab!");
+		return meta.large.canAppend;
+	}
+
+	@property
+	bool finalizable() {
+		return finalizer != null;
+	}
+
+	@property
+	ref ulong allocSize() {
+		assert(!isSlab(), "allocSize accessed on slab!");
+		return meta.large.allocSize;
+	}
+
+	@property
+	ref void* finalizer() {
+		assert(!isSlab(), "finalizer accessed on slab!");
+		return meta.large.finalizer;
+	}
+
+	@property
+	ulong slabSlots() const {
+		assert(isSlab(), "slabSlots accessed on non slab!");
+		return ulong(binInfos[sizeClass].slots);
+	}
+
 	Extent* at(void* ptr, size_t size, HugePageDescriptor* hpd,
 	           ExtentClass ec) {
 		this = Extent(arenaIndex, ptr, size, generation, hpd, ec);
@@ -217,13 +282,30 @@ public:
 		return (bits >> 48) & Mask;
 	}
 
-	uint allocate() {
+	uint allocate(bool isAppendable = false, bool isFinalizable = false) {
 		// FIXME: in contract.
 		assert(isSlab(), "allocate accessed on non slab!");
 		assert(freeSlots > 0, "Slab is full!");
 
 		scope(success) bits -= (1UL << 48);
-		return slabData.setFirst();
+		auto index = slabData.setFirst();
+
+		auto width = slabSlots;
+		if (isAppendable) {
+			assert(width != 512, "cannot set Ap flag on 512-slot slab!");
+			if (width == 256) {
+				meta.slab256.apFlags.setBit(index);
+			} else { // 128 and fewer slots
+				meta.slab128.apFlags.setBit(index);
+			}
+		}
+
+		if (isFinalizable) {
+			assert(width <= 128, "cannot set Fin flag on >128-slot slab!");
+			meta.slab128.finFlags.setBit(index);
+		}
+
+		return index;
 	}
 
 	void free(uint index) {
@@ -233,6 +315,43 @@ public:
 
 		bits += (1UL << 48);
 		slabData.clearBit(index);
+
+		// Clear meta flags, if they exist
+		switch (slabSlots) {
+			case 512:
+				break;
+			case 256:
+				meta.slab256.apFlags.clearBit(index);
+				break;
+			default: // 128 and fewer slots
+				meta.slab128.apFlags.clearBit(index);
+				meta.slab128.finFlags.clearBit(index);
+				break;
+		}
+	}
+
+	@property
+	bool isAppendable(uint index) {
+		assert(isSlab(), "isAppendable(index) accessed on non slab!");
+
+		switch (slabSlots) {
+			case 512:
+				return false; // 512-slot classes are never appendable
+			case 256:
+				return meta.slab256.apFlags.valueAt(index);
+			default: // 128 and fewer slots
+				return meta.slab128.apFlags.valueAt(index);
+		}
+	}
+
+	@property
+	bool isFinalizable(uint index) {
+		assert(isSlab(), "isFinalizable(index) accessed on non slab!");
+
+		if (slabSlots > 128) // >128-slot classes are never finalizable
+			return false;
+
+		return meta.slab128.finFlags.valueAt(index);
 	}
 
 	@property
@@ -240,7 +359,12 @@ public:
 		// FIXME: in contract.
 		assert(isSlab(), "slabData accessed on non slab!");
 
-		return _slabData;
+		return meta.slab512;
+	}
+
+	@property
+	ref _meta extMeta() {
+		return meta;
 	}
 }
 

@@ -65,6 +65,28 @@ private:
 		return cast(shared(Arena)*) arenaStore[index].ptr;
 	}
 
+	bool isSmall(ubyte sizeClass) shared {
+		return sizeClass < ClassCount.Small;
+	}
+
+	bool mayAppend(ubyte sizeClass) shared {
+		return !isSmall(sizeClass) || (binInfos[sizeClass].slots <= 256);
+	}
+
+	bool mayFinalize(ubyte sizeClass) shared {
+		return !isSmall(sizeClass) || (binInfos[sizeClass].slots <= 128);
+	}
+
+	ubyte scWithMeta(size_t size, bool append, bool finalize) shared {
+		auto sc = getSizeClass(size);
+		while ((append && !mayAppend(sc)) || (finalize && !mayFinalize(sc))) {
+			sc += 1;
+			assert(sc <= ubyte.max);
+		}
+
+		return sc;
+	}
+
 public:
 	static getInitialized(uint index) {
 		auto a = getArenaAddress(index);
@@ -110,38 +132,119 @@ public:
 	}
 
 public:
+	// Write length field to a slab'd alloc
+	void saveSmallLength(void* mem, size_t memSize, size_t len) shared {
+		auto lenBytes = memSize < 256 ? 1 : 2;
+		assert(memSize >= len + lenBytes, "no room to save small length!");
+		if (likely(lenBytes == 1)) {
+			(cast(ubyte*) mem)[memSize - 1] = len & 0xFF;
+		} else {
+			(cast(ushort*) mem)[memSize - 2] = len & 0xFFFF;
+		}
+	}
+
+	// Read length field (assumed to exist) from a slab'd alloc
+	size_t getSmallLength(void* mem, size_t memSize) shared {
+		auto lenBytes = memSize < 256 ? 1 : 2;
+		if (likely(lenBytes == 1)) {
+			return (cast(ubyte*) mem)[memSize - 1] & 0xFF;
+		} else {
+			return (cast(ushort*) mem)[memSize - 2] & 0xFFFF;
+		}
+	}
+
+	// Write finalizer to a slab'd alloc
+	void saveSmallFinalizer(void* mem, size_t memSize, void* finalizer) shared {
+		auto lenBytes = memSize < 256 ? 1 : 2;
+		assert(memSize >= lenBytes + 8, "no room to save finalizer!");
+		(cast(void**) mem)[memSize - lenBytes - 8] = finalizer;
+	}
+
+	// Read finalizer (assumed to exist) from a slab'd alloc
+	void* getSmallFinalizer(void* mem, size_t memSize) shared {
+		auto lenBytes = memSize < 256 ? 1 : 2;
+		return (cast(void**) mem)[memSize - lenBytes - 8];
+	}
+
+	/**
+	 * Universal allocator for large (extent) and small (slab'd) allocations.
+	 */
+	void* allocator(shared(ExtentMap)* emap, size_t _size, bool zero = false,
+	                bool isAppendable = false, void* finalizer = null) shared {
+		auto size = _size;
+
+		bool isFinalizable = finalizer != null;
+		bool special = isFinalizable || isAppendable; // If must store length
+
+		if (unlikely(special)) {
+			// Find initial estimate for size class, assuming smallness:
+			auto lenBytes =
+				size < 256 ? 1 : 2; // init estimate for length bytes
+			auto finBytes =
+				isFinalizable ? 8 : 0; // room for void* if finalized
+			auto trySize = size + lenBytes + finBytes;
+			if (unlikely(trySize <= SizeClass.Small)) {
+				// Ensure that we have a size class that allows our meta flags:
+				auto sizeClass =
+					scWithMeta(trySize, isAppendable, isFinalizable);
+				trySize = getSizeFromClass(sizeClass);
+				// May need to recalculate size class if crossed 256 bytes :
+				if (unlikely((lenBytes == 1) && (trySize >= 256))) {
+					trySize += 1; // Now need extra byte for length header
+					sizeClass =
+						scWithMeta(trySize, isAppendable, isFinalizable);
+					size = getSizeFromClass(sizeClass); // Effective size
+				}
+			}
+		}
+
+		// Size class could have started as small but then ratcheted up:
+		if (size <= SizeClass.Small) {
+			auto mem = allocSmall(emap, size, isAppendable, finalizer);
+			if (zero) {
+				memset(mem, 0, _size);
+			}
+
+			if (unlikely(special)) { // Save metadata, if applicable:
+				saveSmallLength(mem, size, _size); // Save alloc length
+				// Save finalizer, if applicable:
+				if (unlikely(isFinalizable)) {
+					saveSmallFinalizer(mem, size, finalizer);
+				}
+			}
+
+			return mem;
+		}
+
+		// Non-slab alloc, use orig. size, and all metadata is saved to extent:
+		return allocLarge(emap, _size, zero, isAppendable, finalizer);
+	}
+
 	/**
 	 * Small allocation facilities.
 	 */
-	void* allocSmall(shared(ExtentMap)* emap, size_t size_) shared {
-		// Reserve storage for allocation size
-		auto reserved = size_ < 256 ? 1 : 2;
-		auto size = size_ + reserved;
-
+	void* allocSmall(shared(ExtentMap)* emap, size_t size,
+	                 bool isAppendable = false, void* finalizer = null) shared {
+		bool isFinalizable = finalizer != null;
 		// TODO: in contracts
 		assert(size > 0 && size <= SizeClass.Small);
 
 		auto sizeClass = getSizeClass(size);
 		assert(sizeClass < ClassCount.Small);
 
-		auto mem = bins[sizeClass].alloc(&this, emap, sizeClass);
-		auto isize = binInfos[sizeClass].itemSize;
-		if (isize < 256) {
-			(cast(ubyte*) mem)[isize - 1] = size_ & 0xFF;
-		} else {
-			(cast(ushort*) mem)[isize - 2] = size_ & 0xFFFF;
-		}
-
-		return mem;
+		return bins[sizeClass]
+			.alloc(&this, emap, sizeClass, isAppendable, isFinalizable);
 	}
 
 	/**
 	 * Large allocation facilities.
 	 */
-	void* allocLarge(shared(ExtentMap)* emap, size_t size,
-	                 bool zero = false) shared {
+	void* allocLarge(shared(ExtentMap)* emap, size_t size, bool zero = false,
+	                 bool isAppendable = false, void* finalizer = null) shared {
 		// TODO: in contracts
 		assert(size > SizeClass.Small && size <= MaxAllocationSize);
+
+		bool isFinalizable = finalizer != null;
 
 		auto computedPageCount = alignUp(size, PageSize) / PageSize;
 		uint pages = computedPageCount & uint.max;
@@ -153,11 +256,17 @@ public:
 			return null;
 		}
 
+		// Save any metadata:
+		e.allocSize = size;
+		e.appendable = isAppendable;
+		e.finalizer = finalizer;
+
 		if (likely(emap.remap(e))) {
 			return e.address;
 		}
 
 		// We failed to map the extent, unwind!
+		e.clearLarge();
 		freePages(e);
 		return null;
 	}
@@ -170,7 +279,19 @@ public:
 		assert(pd.extent.contains(ptr), "Invalid ptr!");
 		assert(pd.extent.arenaIndex == index, "Invalid arena index!");
 
-		if (unlikely(!pd.isSlab()) || bins[pd.sizeClass].free(&this, ptr, pd)) {
+		bool didFree = false;
+		if (unlikely(!pd.isSlab())) {
+			// TODO: call small finalizer if exists
+			pd.extent.clearLarge();
+			didFree = true;
+		} else {
+			// TODO: call large finalizer if exists
+			if (likely(bins[pd.sizeClass].free(&this, ptr, pd))) {
+				didFree = true;
+			}
+		}
+
+		if (didFree) {
 			emap.clear(pd.extent);
 			freePages(pd.extent);
 		}

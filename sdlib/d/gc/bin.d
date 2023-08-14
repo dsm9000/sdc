@@ -22,8 +22,8 @@ struct Bin {
 	import d.gc.heap;
 	Heap!(Extent, addrExtentCmp) slabs;
 
-	void* alloc(shared(Arena)* arena, shared(ExtentMap)* emap,
-	            ubyte sizeClass) shared {
+	void* alloc(shared(Arena)* arena, shared(ExtentMap)* emap, ubyte sizeClass,
+	            bool isAppendable, bool isFinalizable) shared {
 		assert(sizeClass < ClassCount.Small);
 		assert(&arena.bins[sizeClass] == &this, "Invalid arena or sizeClass!");
 
@@ -42,7 +42,7 @@ struct Bin {
 				return null;
 			}
 
-			index = slab.allocate();
+			index = slab.allocate(isAppendable, isFinalizable);
 		}
 
 		return slab.address + index * size;
