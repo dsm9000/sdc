@@ -1,5 +1,7 @@
 module d.gc.util;
 
+import core.bitop;
+
 T min(T)(T a, T b) {
 	return a <= b ? a : b;
 }
@@ -310,14 +312,25 @@ ushort readPackedU15(void* loc) {
 	return (data >>> 1) & mask;
 }
 
-void writePackedU15(void* loc, ushort x) {
-	auto locptr = (cast(ushort*) loc);
-	// If writing a one-byte packedU15, don't disturb the unused byte:
-	ushort mask = 0xff00 | (0xff & ((0x7f - x) >> 16));
-	// FIXME: detect that we're actually on a little-endian machine:
-	ushort current = swapEndian(0xffff & (x << 1) | (mask & 1));
-	ushort old = *locptr;
-	*locptr = old ^ (mask & (old ^ current));
+void writePackedU15(void* ptr, ushort x) {
+	// auto locptr = (cast(ushort*) loc);
+	// // If writing a one-byte packedU15, don't disturb the unused byte:
+	// ushort mask = 0xff00 | (0xff & ((0x7f - x) >> 16));
+	// // FIXME: detect that we're actually on a little-endian machine:
+	// ushort current = swapEndian(0xffff & (x << 1) | (mask & 1));
+	// ushort old = *locptr;
+	// *locptr = old ^ (mask & (old ^ current));
+
+    auto base = (x << 1) | (x > 0x7f);
+    auto mask = -(x > 0x7f) | 0xff00;
+
+    //import core.bitop;
+    auto value = byteswap(base & ushort.max);
+
+    auto current = *ptr;
+    ushort delta = (current ^ value) & mask;
+    *ptr = current ^ delta;
+	
 }
 
 unittest PackedU15 {
