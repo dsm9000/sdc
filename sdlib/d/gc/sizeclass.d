@@ -47,21 +47,6 @@ enum SizeClass {
 
 enum MaxTinySize = ClassCount.Tiny * Quantum;
 
-// Determine whether given size is permitted by allocator.
-bool isAllocatableSize(size_t size) {
-	return size > 0 && size <= MaxAllocationSize;
-}
-
-unittest isAllocatableSize {
-	assert(!isAllocatableSize(0));
-	assert(isAllocatableSize(1));
-	assert(isAllocatableSize(42));
-	assert(isAllocatableSize(99999));
-	assert(isAllocatableSize(MaxAllocationSize));
-	assert(!isAllocatableSize(MaxAllocationSize + 1));
-	assert(!isAllocatableSize(size_t.max));
-}
-
 // Determine whether given size class is considered 'small' (slab-allocatable).
 bool isSmallSizeClass(uint sizeClass) {
 	return sizeClass < ClassCount.Small;
@@ -74,6 +59,7 @@ bool isSmallSize(size_t size) {
 
 // Determine whether given size may fit into a 'large' size class.
 bool isLargeSize(size_t size) {
+	import d.gc.size;
 	return (size > SizeClass.Small) && (size <= MaxAllocationSize);
 }
 
@@ -163,7 +149,7 @@ ubyte getSizeClass(size_t size) {
 }
 
 unittest getSizeClass {
-	import d.gc.bin;
+	import d.gc.slab;
 	assert(getSizeClass(0) == InvalidBinID);
 
 	size_t[] boundaries =
@@ -185,7 +171,7 @@ unittest getSizeClass {
 
 size_t getSizeFromClass(uint sizeClass) {
 	if (isSmallSizeClass(sizeClass)) {
-		import d.gc.bin;
+		import d.gc.slab;
 		return binInfos[sizeClass].itemSize;
 	}
 
@@ -213,7 +199,7 @@ unittest getSizeFromClass {
 }
 
 auto getBinInfos() {
-	import d.gc.bin;
+	import d.gc.slab;
 	BinInfo[ClassCount.Small] bins;
 
 	computeSizeClass((uint id, uint grp, uint delta, uint ndelta) {

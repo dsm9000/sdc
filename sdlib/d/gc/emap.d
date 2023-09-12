@@ -27,9 +27,13 @@ public:
 		return leaf is null ? PageDescriptor(0) : leaf.load();
 	}
 
+	bool map(void* address, uint pages, PageDescriptor pd) shared {
+		return tree.setRange(address, pages, pd);
+	}
+
 	bool remap(Extent* extent, ExtentClass ec) shared {
-		return tree
-			.setRange(extent.address, extent.size, PageDescriptor(extent, ec));
+		return
+			map(extent.address, extent.pageCount, PageDescriptor(extent, ec));
 	}
 
 	bool remap(Extent* extent) shared {
@@ -39,7 +43,11 @@ public:
 	}
 
 	void clear(Extent* extent) shared {
-		tree.clearRange(extent.address, extent.size);
+		clear(extent.address, extent.pageCount);
+	}
+
+	void clear(void* address, uint pages) shared {
+		tree.clearRange(address, pages);
 	}
 }
 
@@ -100,9 +108,9 @@ public:
 		return data >> 60;
 	}
 
-	auto next() const {
-		enum Increment = 1UL << 60;
-		return PageDescriptor(data + Increment);
+	auto next(uint pages = 1) const {
+		auto increment = ulong(pages) << 60;
+		return PageDescriptor(data + increment);
 	}
 
 	/**
@@ -186,5 +194,25 @@ unittest ExtentMap {
 	for (auto p = ptr; p < end; p += PageSize) {
 		assert(emap.lookup(p).data == pd.data);
 		pd = pd.next();
+	}
+
+	emap.clear(e);
+
+	// Shrink a range.
+	e.at(ptr, 5 * PageSize, null, ec);
+	emap.remap(e, ec);
+	pd = PageDescriptor(e, ec);
+
+	emap.clear(e.address + 3 * PageSize, 2);
+	e.at(ptr, 3 * PageSize, null, ec);
+
+	for (auto p = ptr; p < e.address + 3 * PageSize; p += PageSize) {
+		assert(emap.lookup(p).data == pd.data);
+		pd = pd.next();
+	}
+
+	for (auto p = e.address + 3 * PageSize; p < e.address + 5 * PageSize;
+	     p += PageSize) {
+		assert(emap.lookup(p).data == 0);
 	}
 }

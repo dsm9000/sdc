@@ -98,12 +98,9 @@ private:
 
 	Links _links;
 
-	// The largest slab slot count for which the use of flags is possible:
-	enum maxFlags = 256;
-
 	import d.gc.bitmap;
 	union MetaData {
-		// Slab occupancy (and freespace flags for supported size classes.)
+		// Slab occupancy (and metadata flags for supported size classes)
 		Bitmap!512 slabData;
 
 		// Metadata for large extents.
@@ -127,7 +124,7 @@ private:
 		bits |= ulong(arenaIndex) << 32;
 
 		if (ec.isSlab()) {
-			import d.gc.bin;
+			import d.gc.slab;
 			bits |= ulong(binInfos[ec.sizeClass].slots) << 48;
 
 			slabData.clear();
@@ -166,8 +163,24 @@ public:
 		return sizeAndGen & ~PageMask;
 	}
 
+	@property
+	uint pageCount() const {
+		auto pc = sizeAndGen / PageSize;
+
+		assert(pc == pc & uint.max, "Invalid page count!");
+		return pc & uint.max;
+	}
+
 	bool isHuge() const {
 		return size > HugePageSize;
+	}
+
+	@property
+	uint hpdIndex() const {
+		assert(isHuge() || hpd.address is alignDown(address, HugePageSize));
+		assert(!isHuge() || isAligned(address, HugePageSize));
+
+		return ((cast(size_t) address) / PageSize) % PagesInHugePage;
 	}
 
 	@property
@@ -266,8 +279,11 @@ public:
 	}
 
 	uint freeSpaceIndex(uint index) {
-		assert(index < maxFlags, "Invalid flag index!");
-		return index + maxFlags;
+		// The largest slab slot count for which the use of flags is possible:
+		enum MaxFlags = 256;
+
+		assert(index < MaxFlags, "Invalid flag index!");
+		return index + MaxFlags;
 	}
 
 	bool hasFreeSpace(uint index) {
@@ -277,12 +293,14 @@ public:
 
 	void clearFreeSpace(uint index) {
 		// FIXME: atomic
-		slabData.clearBit(freeSpaceIndex(index));
+		(cast(shared Bitmap!512) slabData)
+			.setBitValueAtomic!false(freeSpaceIndex(index));
 	}
 
 	void setFreeSpace(uint index) {
 		// FIXME: atomic
-		slabData.setBit(freeSpaceIndex(index));
+		(cast(shared Bitmap!512) slabData)
+			.setBitValueAtomic!true(freeSpaceIndex(index));
 	}
 
 	/**

@@ -5,9 +5,6 @@ import d.gc.util;
 // Pointer sized one.
 enum size_t One = 1;
 
-// We make sure we can count allocated pages on a uint.
-enum size_t MaxAllocationSize = uint.max * PageSize;
-
 // Pointer size.
 enum LgPointerSize = log2floor(size_t.sizeof);
 enum PointerSize = One << LgPointerSize;
@@ -37,12 +34,14 @@ enum LgHugePageSize = 21;
 enum HugePageSize = One << LgHugePageSize;
 enum HugePageMask = HugePageSize - 1;
 
+enum uint PagesInHugePage = HugePageSize / PageSize;
+
 // Virtual address space.
 enum LgAddressSpace = 48;
 enum AddressSpace = One << LgAddressSpace;
 enum AddressMask = AddressSpace - 1;
 
-// Allocator spêcific config.
+// Allocator specific config.
 enum LgExtentSize = 7;
 enum ExtentSize = One << LgExtentSize;
 enum ExtentAlign = ExtentSize;
