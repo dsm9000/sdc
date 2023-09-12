@@ -346,14 +346,14 @@ private:
 		uint l = s.length;
 		uint begin = index - l;
 
-		auto location = base.getWithOffsets(begin, index);
-
 		if (popIdentifierWithPrefix!s() == 0) {
+			auto location = base.getWithOffsets(begin, index);
 			return Token.getKeyword!s(location);
 		}
 
 		// This is an identifier that happened to start
 		// like a keyword.
+		auto location = base.getWithOffsets(begin, index);
 		return Token
 			.getIdentifier(location, context.getName(content[begin .. index]));
 	}
@@ -612,4 +612,17 @@ unittest {
 
 	// Go over invalid unicode.
 	checkLexInvalid("\xe2\x82", "Invalid UTF-8 sequence.");
+
+	{
+		// Identifier starting with a keyword
+		auto lex = makeTestLexer("dos");
+
+		import source.parserutil;
+		lex.match(TokenType.Begin);
+
+		assert(lex.front.type == TokenType.Identifier);
+		assert(
+			lex.front.location.getFullLocation(lex.context).getSlice() == "dos"
+		);
+	}
 }

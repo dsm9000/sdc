@@ -242,16 +242,16 @@ public:
 
 		@property
 		uint length() const {
-			return _length;
+			return (_length - index) & (empty - 1);
 		}
 
 		@property
 		bool empty() const {
-			return index >= length;
+			return index >= _length;
 		}
 	}
 
-	Range opIndex() const {
+	Range opSlice() const {
 		return Range(this);
 	}
 
@@ -300,12 +300,15 @@ public:
 		 *   - false (duh!)
 		 *   - 0
 		 *   - 0.0
+		 *   - -0.0
 		 *   - ""
 		 *   - []
 		 *   - {}
 		 */
 		enum FalseMask = OtherFlag | BoolFlag | IntegerPrefix;
-		if (((payload | FalseMask) == FalseMask) || (payload == FloatOffset)) {
+		enum FloatMask = 0x7fffffffffffffff;
+		if (((payload | FalseMask) == FalseMask)
+			    || ((payload & FloatMask) == FloatOffset)) {
 			return false;
 		}
 
@@ -397,7 +400,8 @@ public:
 	}
 
 	bool opEquals(F : double)(F f) const {
-		return payload == Double(f).toPayload();
+		return payload == Double(f).toPayload()
+			|| Double(payload).toFloat() == f;
 	}
 
 	bool opEquals(V)(V v) const if (.isHeapValue!V || isBoxedHeapValue!V) {
@@ -409,7 +413,7 @@ public:
 	}
 
 	bool opEquals(const ref Value rhs) const {
-		if (payload == rhs.payload) {
+		if (rhs == Double(payload).toFloat()) {
 			/**
 			 * Floating point's NaN is usually not equal to itself.
 			 * However, this forces us to special case them here,
@@ -464,7 +468,8 @@ unittest {
 		0,
 		1,
 		42,
-		0.,
+		0.0,
+		-0.0,
 		3.141592,
 		float.infinity,
 		-float.infinity,
@@ -543,7 +548,8 @@ unittest {
 	testValue!"Integer"(0);
 	testValue!"Integer"(1);
 	testValue!"Integer"(42);
-	testValue!"Float"(0.);
+	testValue!"Float"(0.0);
+	testValue!"Float"(-0.0);
 	testValue!"Float"(3.141592);
 	testValue!"Float"(float.infinity);
 	testValue!"Float"(-float.infinity);
@@ -675,6 +681,19 @@ unittest {
 		foreach (Value e; v[]) {
 			assert(e == expected[i++]);
 		}
+
+		// Check that the length adapts when we pop elements.
+		auto r = v[];
+		assert(r.length == v.length);
+
+		foreach (n; 0 .. v.length) {
+			r.popFront();
+			assert(r.length == v.length - n - 1);
+		}
+
+		// Pop past the end.
+		r.popFront();
+		assert(r.length == 0);
 	}
 
 	Value a = [1, 2, 3, 4, 5];
@@ -697,7 +716,7 @@ unittest {
 	assert(!!Value(1) == true);
 	assert(!!Value(42) == true);
 	assert(!!Value(0.0) == false);
-	assert(!!Value(-0.0) == true);
+	assert(!!Value(-0.0) == false);
 	assert(!!Value(1.0) == true);
 	assert(!!Value(-1.0) == true);
 	assert(!!Value(float.infinity) == true);
