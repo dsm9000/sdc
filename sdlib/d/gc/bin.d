@@ -21,7 +21,7 @@ struct Bin {
 	Heap!(Extent, addrExtentCmp) slabs;
 
 	void* alloc(shared(Arena)* arena, shared(ExtentMap)* emap,
-	            ubyte sizeClass) shared {
+	            ubyte sizeClass, uint slotCount = 1) shared {
 		import d.gc.sizeclass;
 		assert(sizeClass < ClassCount.Small);
 		assert(&arena.bins[sizeClass] == &this, "Invalid arena or sizeClass!");
@@ -37,12 +37,12 @@ struct Bin {
 			mutex.lock();
 			scope(exit) mutex.unlock();
 
-			slab = (cast(Bin*) &this).getSlab(arena, emap, sizeClass);
+			slab = (cast(Bin*) &this).getSlab(arena, emap, sizeClass, slotCount);
 			if (slab is null) {
 				return null;
 			}
 
-			index = slab.allocate();
+			index = slab.allocate(); // TODO
 		}
 
 		return slab.address + index * size;
@@ -98,12 +98,12 @@ private:
 		return false;
 	}
 
-	auto tryGetSlab() {
+	auto tryGetSlab(uint slotCount) {
 		// FIXME: in contract.
 		assert(mutex.isHeld(), "Mutex not held!");
 
 		// If the current slab still have free slots, go for it.
-		if (current !is null && current.freeSlots != 0) {
+		if (current !is null && current.freeSlots >= slotCount) {
 			return current;
 		}
 
@@ -112,7 +112,7 @@ private:
 	}
 
 	auto getSlab(shared(Arena)* arena, shared(ExtentMap)* emap,
-	             ubyte sizeClass) {
+	             ubyte sizeClass, uint slotCount) {
 		// FIXME: in contract.
 		assert(mutex.isHeld(), "Mutex not held!");
 
@@ -133,11 +133,11 @@ private:
 		if (slab is null) {
 			// Another thread might have been successful
 			// while we did not hold the lock.
-			return tryGetSlab();
+			return tryGetSlab(slotCount);
 		}
 
 		// We may have allocated the slab we need when the lock was released.
-		if (current is null || current.freeSlots == 0) {
+		if (current is null || current.freeSlots < slotCount) {
 			current = slab;
 			return slab;
 		}
